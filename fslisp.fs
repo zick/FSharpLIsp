@@ -175,6 +175,11 @@ let addToEnv (sym : LObj) (value : LObj) (env : LObj) =
   | :? Cons as cons -> cons.car <- makeCons (makeCons sym value) cons.car
   | _ -> ()
 
+let updateVar sym value env =
+  match findVar sym env with
+  | :? Cons as cons -> cons.cdr <- value
+  | _ -> addToEnv sym value gEnv
+
 let rec eval (obj : LObj) (env : LObj) =
   match obj with
   | :? Sym ->
@@ -199,6 +204,13 @@ and evalCons obj env =
     elif opr = (makeSym "defun") then
       addToEnv (safeCar args) (makeExpr (safeCdr args) env) gEnv
       safeCar args
+    elif opr = (makeSym "setq") then
+      let value = eval (safeCar (safeCdr args)) env in
+      let sym = safeCar args in
+        match value with
+        | :? Error -> value
+        | _ -> (updateVar sym value env; value)
+
     else apply (eval opr env) (evlis args env kNil) env
 and evlis lst env acc =
   match lst with
