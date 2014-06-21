@@ -244,6 +244,58 @@ let subrCdr args = safeCdr (safeCar args)
 
 let subrCons args = makeCons (safeCar args) (safeCar (safeCdr args))
 
+let subrEq args =
+  let x = safeCar args in
+  let y = safeCar (safeCdr args) in
+  match x with
+  | :? Num as n1 ->
+      match y with
+      | :? Num as n2 ->
+          if n1.num = n2.num then makeSym "t"
+          else kNil
+      | _ -> kNil
+  | _ -> if x = y then makeSym "t"
+         else kNil
+
+let subrAtom args =
+  match safeCar args with
+  | :? Cons -> kNil
+  | _ -> makeSym "t"
+
+let subrNumberp args =
+  match safeCar args with
+  | :? Num -> makeSym "t"
+  | _ -> kNil
+
+let subrSymbolp args =
+  match safeCar args with
+  | :? Sym -> makeSym "t"
+  | _ -> kNil
+
+let subrAddOrMul f initVal =
+  let rec doit (args : LObj) acc =
+    match args with
+    | :? Cons as cons ->
+        match cons.car with
+        | :? Num as n -> doit cons.cdr (f (acc, n.num))
+        | _ -> makeError "wrong type"
+    | _ -> makeNum acc
+  in fun args -> doit args initVal
+let subrAdd = subrAddOrMul (fun (x, y) -> x + y) 0
+let subrMul = subrAddOrMul (fun (x, y) -> x * y) 1
+
+let subrSubOrDivOrMod f =
+  fun (args : LObj) ->
+    match safeCar args with
+    | :? Num as n1 ->
+        match safeCar (safeCdr args) with
+        | :? Num as n2 -> makeNum (f (n1.num, n2.num))
+        | _ -> makeError "wrong type"
+    | _ -> makeError "wrong type"
+let subrSub : LObj -> LObj = subrSubOrDivOrMod (fun (x, y) -> x - y)
+let subrDiv : LObj -> LObj = subrSubOrDivOrMod (fun (x, y) -> x / y)
+let subrMod : LObj -> LObj = subrSubOrDivOrMod (fun (x, y) -> x % y)
+
 let first (x, y) = x
 
 let rec repl () =
@@ -258,5 +310,14 @@ let () =
   addToEnv (makeSym "car") (makeSubr subrCar) gEnv
   addToEnv (makeSym "cdr") (makeSubr subrCdr) gEnv
   addToEnv (makeSym "cons") (makeSubr subrCons) gEnv
+  addToEnv (makeSym "eq") (makeSubr subrEq) gEnv
+  addToEnv (makeSym "atom") (makeSubr subrAtom) gEnv
+  addToEnv (makeSym "numberp") (makeSubr subrNumberp) gEnv
+  addToEnv (makeSym "symbolp") (makeSubr subrSymbolp) gEnv
+  addToEnv (makeSym "+") (makeSubr subrAdd) gEnv
+  addToEnv (makeSym "*") (makeSubr subrMul) gEnv
+  addToEnv (makeSym "-") (makeSubr subrSub) gEnv
+  addToEnv (makeSym "/") (makeSubr subrDiv) gEnv
+  addToEnv (makeSym "mod") (makeSubr subrMod) gEnv
   addToEnv (makeSym "t") (makeSym "t") gEnv
   repl ()
