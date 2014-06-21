@@ -48,6 +48,7 @@ let makeNum n = o(Num n)
 let makeError s = o(Error s)
 let makeCons a d = o(Cons (a, d))
 let makeSubr fn = o(Subr fn)
+let makeExpr args env = o(Expr (safeCar args, safeCdr args, env))
 
 let symTable = ref (Map.ofList [("nil", kNil)])
 let makeSym str =
@@ -66,6 +67,18 @@ let rec nreconc (lst : LObj) (tail : LObj) =
         nreconc tmp lst
   | _ -> tail
 let nreverse lst = nreconc lst kNil
+
+let pairlis (lst1 : LObj) (lst2 : LObj) =
+  let rec doit (lst1 : LObj) (lst2 : LObj) acc =
+    match lst1 with
+    | :? Cons as cons1 ->
+        match lst2 with
+        | :? Cons as cons2 ->
+            doit cons1.cdr cons2.cdr
+                 (makeCons (makeCons cons1.car cons2.car) acc)
+        | _ -> nreverse acc
+    | _ -> nreverse acc
+  doit lst1 lst2 kNil
 
 let isSpace c =
   c = '\t' || c = '\r' || c = '\n' || c = ' '
@@ -181,6 +194,8 @@ and evalCons obj env =
         | :? Error -> c
         | :? Nil -> eval (safeCar (safeCdr (safeCdr args))) env
         | _ -> eval (safeCar (safeCdr args)) env
+    elif opr = (makeSym "lambda") then
+      makeExpr args env
     else apply (eval opr env) (evlis args env kNil) env
 and evlis lst env acc =
   match lst with
@@ -189,6 +204,14 @@ and evlis lst env acc =
       match eval (safeCar lst) env with
       | :? Error as err -> o(err)
       | elm -> evlis (safeCdr lst) env (makeCons elm acc)
+and progn (body : LObj) env acc =
+  match body with
+  | :? Cons as cons ->
+      let v = eval cons.car env in
+        match v with
+        | :? Error -> v
+        | _ -> progn cons.cdr env v
+  | _ -> acc
 and apply f args env =
   match args with
   | :? Error -> args
@@ -196,6 +219,8 @@ and apply f args env =
       match f with
       | :? Error -> f
       | :? Subr as subr -> subr.fn args
+      | :? Expr as expr ->
+          progn expr.body (makeCons (pairlis expr.args args) expr.env) kNil
       | _ -> makeError ((printObj f) + " is not function")
 
 let subrCar args = safeCar (safeCar args)
