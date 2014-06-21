@@ -115,6 +115,37 @@ and printList obj delimiter acc =
   | Nil -> acc
   | _ -> acc + " . " + (printObj obj)
 
+let rec findVarInFrame str alist =
+  match safeCar (safeCar alist) with
+  | Sym k -> if k = str then safeCar alist
+             else findVarInFrame str (safeCdr alist)
+  | _ -> Nil
+let rec findVar sym env =
+  match (env, sym) with
+  | (Cons(a, d), Sym str) ->
+      match findVarInFrame str !a with
+      | Nil -> findVar sym !d
+      | pair -> pair
+  | _ -> Nil
+
+let gEnv = makeCons Nil Nil
+
+let addToEnv sym value env =
+  match env with
+  | Cons(a, d) -> a := makeCons (makeCons sym value) !a
+  | _ -> ()
+
+let rec eval obj env =
+  match obj with
+  | Sym _ ->
+      match findVar obj env with
+      | Nil -> Error ((printObj obj) + " has no value")
+      | pair -> safeCdr pair
+  | Cons _ -> evalCons obj env
+  | _ -> obj
+and evalCons obj env =
+  Error "noimpl"
+
 let first (x, y) = x
 
 let rec repl () =
@@ -122,8 +153,9 @@ let rec repl () =
   match Console.ReadLine () with
   | null -> ()
   | line ->
-      Console.WriteLine (printObj (first (read line)))
+      Console.WriteLine (printObj (eval (first (read line)) gEnv))
       repl ()
 
 let () =
+  addToEnv (makeSym "t") (makeSym "t") gEnv
   repl ()
