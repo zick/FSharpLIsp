@@ -4,44 +4,67 @@ let kLPar = '('
 let kRPar = ')'
 let kQuote = '\''
 
-type Obj =
-  | Nil
-  | Num of Int32
-  | Sym of String
-  | Error of String
-  | Cons of (Obj ref) * (Obj ref)
-  | Subr of (Obj -> Obj)
-  | Expr of Obj * Obj * Obj
+type LObj(tag : String) =
+  member this.tag = tag
+type Nil() =
+  inherit LObj("nil")
+type Num(n : Int32) =
+  inherit LObj("num")
+  member this.num = n
+type Sym(s : String) =
+  inherit LObj("sym")
+  member this.str = s
+type Error(s : String) =
+  inherit LObj("error")
+  member this.str = s
+type Cons(a : LObj, d : LObj) =
+  inherit LObj("cons")
+  member val car = a with get, set
+  member val cdr = d with get, set
+type Subr(fn : LObj -> LObj) =
+  inherit LObj("subr")
+  member this.fn = fn
+type Expr(args : LObj, body : LObj, env : LObj) =
+  inherit LObj("expr")
+  member this.args = args
+  member this.body = body
+  member this.env = env
 
-let safeCar obj =
+let o obj = obj :> LObj
+
+let kNil = o(Nil ())
+
+let safeCar (obj : LObj) =
   match obj with
-  | Cons(a, d) -> !a
-  | _ -> Nil
+  | :? Cons as c -> c.car
+  | _ -> kNil
 
-let safeCdr obj =
+let safeCdr (obj : LObj) =
   match obj with
-  | Cons(a, d) -> !d
-  | _ -> Nil
+  | :? Cons as c -> c.cdr
+  | _ -> kNil
 
-let symTable = ref (Map.ofList [("nil", Nil)])
+let makeNum n = o(Num n)
+let makeError s = o(Error s)
+let makeCons a d = o(Cons (a, d))
+
+let symTable = ref (Map.ofList [("nil", kNil)])
 let makeSym str =
   if Map.containsKey str !symTable then
     Map.find str !symTable
   else
-    let sym = Sym str in
+    let sym = o(Sym str) in
       symTable := Map.add str sym !symTable;
       sym
 
-let makeCons a d = Cons(ref a, ref d)
-
-let rec nreconc lst tail =
+let rec nreconc (lst : LObj) (tail : LObj) =
   match lst with
-  | Cons(a, d) ->
-      let tmp = !d in
-        d := tail;
+  | :? Cons as c ->
+      let tmp = c.cdr in
+        c.cdr <- tail;
         nreconc tmp lst
   | _ -> tail
-let nreverse lst = nreconc lst Nil
+let nreverse lst = nreconc lst kNil
 
 let isSpace c =
   c = '\t' || c = '\r' || c = '\n' || c = ' '
@@ -57,7 +80,7 @@ let skipSpaces str =
   doit 0
 
 let makeNumOrSym str =
-  try Num (Int32.Parse str)
+  try makeNum (Int32.Parse str)
   with
    | :? FormatException -> makeSym str
 
@@ -83,68 +106,71 @@ let lookAhead str =
 
 let rec read str =
   let (str1, c, rest) = lookAhead str in
-    if str1 = "" then (Error "empty input", "")
-    elif c = kRPar then (Error ("invalid syntax: " + str), "")
-    elif c = kLPar then readList rest Nil
+    if str1 = "" then (makeError "empty input", "")
+    elif c = kRPar then (makeError ("invalid syntax: " + str), "")
+    elif c = kLPar then readList rest kNil
     elif c = kQuote then readQuote rest
     else readAtom str1
 and readQuote str =
   let (elm, next) = read str in
-    (makeCons (makeSym "quote") (makeCons elm Nil), next)
+    (makeCons (makeSym "quote") (makeCons elm kNil), next)
 and readList str acc =
   let (str1, c, rest) = lookAhead str in
-    if str1 = "" then (Error "unfinished parenthesis", "")
+    if str1 = "" then (makeError "unfinished parenthesis", "")
     elif c = kRPar then (nreverse acc, rest)
     else
-      match read str1 with
-      | (Error e, next) -> (Error e, next)
-      | (elm, next) -> readList next (makeCons elm acc)
+      let (obj, next) = read str1 in
+      match obj with
+      | :? Error -> (obj, next)
+      | _ -> readList next (makeCons obj acc)
 
-let rec printObj obj =
+let rec printObj (obj : LObj) =
   match obj with
-  | Nil -> "nil"
-  | Num num -> num.ToString ()
-  | Sym name -> name
-  | Error msg -> "<error: " + msg + ">"
-  | Cons _ -> "(" + (printList obj "" "") + ")"
-  | Subr _ -> "<subr>"
-  | Expr _ -> "<expr>"
+  | :? Nil -> "nil"
+  | :? Num as num -> num.num.ToString ()
+  | :? Sym as sym -> sym.str
+  | :? Error as err -> "<error: " + err.str + ">"
+  | :? Cons -> "(" + (printList obj "" "") + ")"
+  | :? Subr -> "<subr>"
+  | :? Expr -> "<expr>"
+  | _ -> "<unknown>"
 and printList obj delimiter acc =
   match obj with
-  | Cons(a, d) -> printList (!d) " " (acc + delimiter + (printObj !a))
-  | Nil -> acc
+  | :? Cons as cons ->
+      printList cons.cdr " " (acc + delimiter + (printObj cons.car))
+  | :? Nil -> acc
   | _ -> acc + " . " + (printObj obj)
 
-let rec findVarInFrame str alist =
+let rec findVarInFrame (sym : LObj) (alist : LObj) =
   match safeCar (safeCar alist) with
-  | Sym k -> if k = str then safeCar alist
-             else findVarInFrame str (safeCdr alist)
-  | _ -> Nil
-let rec findVar sym env =
-  match (env, sym) with
-  | (Cons(a, d), Sym str) ->
-      match findVarInFrame str !a with
-      | Nil -> findVar sym !d
-      | pair -> pair
-  | _ -> Nil
-
-let gEnv = makeCons Nil Nil
-
-let addToEnv sym value env =
+  | :? Sym as s -> if o(s) = sym then safeCar alist
+                   else findVarInFrame sym (safeCdr alist)
+  | _ -> kNil
+let rec findVar (sym : LObj) (env : LObj) =
   match env with
-  | Cons(a, d) -> a := makeCons (makeCons sym value) !a
+  | :? Cons as cons ->
+      match findVarInFrame sym cons.car with
+      | :? Nil -> findVar sym cons.cdr
+      | pair -> pair
+  | _ -> kNil
+
+let gEnv = makeCons kNil kNil
+
+let addToEnv (sym : LObj) (value : LObj) (env : LObj) =
+  match env with
+  | :? Cons as cons -> cons.car <- makeCons (makeCons sym value) cons.car
   | _ -> ()
 
-let rec eval obj env =
+let rec eval (obj : LObj) (env : LObj) =
   match obj with
-  | Sym _ ->
+  | :? Sym ->
       match findVar obj env with
-      | Nil -> Error ((printObj obj) + " has no value")
+      | :? Nil -> makeError ((printObj obj) + " has no value")
       | pair -> safeCdr pair
-  | Cons _ -> evalCons obj env
+  | :? Cons -> evalCons obj env
   | _ -> obj
 and evalCons obj env =
-  Error "noimpl"
+  makeError "noimpl"
 
 let first (x, y) = x
 
