@@ -47,6 +47,7 @@ let safeCdr (obj : LObj) =
 let makeNum n = o(Num n)
 let makeError s = o(Error s)
 let makeCons a d = o(Cons (a, d))
+let makeSubr fn = o(Subr fn)
 
 let symTable = ref (Map.ofList [("nil", kNil)])
 let makeSym str =
@@ -170,7 +171,38 @@ let rec eval (obj : LObj) (env : LObj) =
   | :? Cons -> evalCons obj env
   | _ -> obj
 and evalCons obj env =
-  makeError "noimpl"
+  let opr = safeCar obj in
+  let args = safeCdr obj in
+    if opr = (makeSym "quote") then
+      safeCar args
+    elif opr = (makeSym "if") then
+      let c = eval (safeCar args) env in
+        match c with
+        | :? Error -> c
+        | :? Nil -> eval (safeCar (safeCdr (safeCdr args))) env
+        | _ -> eval (safeCar (safeCdr args)) env
+    else apply (eval opr env) (evlis args env kNil) env
+and evlis lst env acc =
+  match lst with
+  | :? Nil -> nreverse acc
+  | _ ->
+      match eval (safeCar lst) env with
+      | :? Error as err -> o(err)
+      | elm -> evlis (safeCdr lst) env (makeCons elm acc)
+and apply f args env =
+  match args with
+  | :? Error -> args
+  | _ ->
+      match f with
+      | :? Error -> f
+      | :? Subr as subr -> subr.fn args
+      | _ -> makeError ((printObj f) + " is not function")
+
+let subrCar args = safeCar (safeCar args)
+
+let subrCdr args = safeCdr (safeCar args)
+
+let subrCons args = makeCons (safeCar args) (safeCar (safeCdr args))
 
 let first (x, y) = x
 
@@ -183,5 +215,8 @@ let rec repl () =
       repl ()
 
 let () =
+  addToEnv (makeSym "car") (makeSubr subrCar) gEnv
+  addToEnv (makeSym "cdr") (makeSubr subrCdr) gEnv
+  addToEnv (makeSym "cons") (makeSubr subrCons) gEnv
   addToEnv (makeSym "t") (makeSym "t") gEnv
   repl ()
