@@ -32,6 +32,17 @@ let makeSym str =
       symTable := Map.add str sym !symTable;
       sym
 
+let makeCons a d = Cons(ref a, ref d)
+
+let rec nreconc lst tail =
+  match lst with
+  | Cons(a, d) ->
+      let tmp = !d in
+        d := tail;
+        nreconc tmp lst
+  | _ -> tail
+let nreverse lst = nreconc lst Nil
+
 let isSpace c =
   c = '\t' || c = '\r' || c = '\n' || c = ' '
 
@@ -62,24 +73,47 @@ let readAtom str =
   | Some n -> (makeNumOrSym (str.Substring (0, n)), str.Substring n)
   | None -> (makeNumOrSym str, "")
 
-let read str =
+let lookAhead str =
   let str1 = skipSpaces str in
   let c = if str1 = "" then '_' else str.[0] in
+  let rest = if str1 = "" then ""
+             else str.Substring 1 in
+    (str1, c, rest)
+
+
+let rec read str =
+  let (str1, c, rest) = lookAhead str in
     if str1 = "" then (Error "empty input", "")
     elif c = kRPar then (Error ("invalid syntax: " + str), "")
-    elif c = kLPar then (Error "noimpl", "")
-    elif c = kQuote then (Error "noimpl", "")
+    elif c = kLPar then readList rest Nil
+    elif c = kQuote then readQuote rest
     else readAtom str1
+and readQuote str =
+  let (elm, next) = read str in
+    (makeCons (makeSym "quote") (makeCons elm Nil), next)
+and readList str acc =
+  let (str1, c, rest) = lookAhead str in
+    if str1 = "" then (Error "unfinished parenthesis", "")
+    elif c = kRPar then (nreverse acc, rest)
+    else
+      match read str1 with
+      | (Error e, next) -> (Error e, next)
+      | (elm, next) -> readList next (makeCons elm acc)
 
-let printObj obj =
+let rec printObj obj =
   match obj with
   | Nil -> "nil"
   | Num num -> num.ToString ()
   | Sym name -> name
   | Error msg -> "<error: " + msg + ">"
-  | Cons _ -> "CONS"
+  | Cons _ -> "(" + (printList obj "" "") + ")"
   | Subr _ -> "<subr>"
   | Expr _ -> "<expr>"
+and printList obj delimiter acc =
+  match obj with
+  | Cons(a, d) -> printList (!d) " " (acc + delimiter + (printObj !a))
+  | Nil -> acc
+  | _ -> acc + " . " + (printObj obj)
 
 let first (x, y) = x
 
